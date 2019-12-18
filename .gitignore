@@ -27,5 +27,6 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
+*.jrtc
 
 # End of https://www.gitignore.io/api/windows
