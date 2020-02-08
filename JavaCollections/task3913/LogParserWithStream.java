@@ -2,31 +2,31 @@ package com.javarush.task.task39.task3913;
 
 import com.javarush.task.task39.task3913.query.QLQuery;
 
-import java.io.*;
-import java.net.URLDecoder;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
-public class LogParser implements QLQuery {
+public class LogParserWithStream implements QLQuery {
     private Path logDir;
-    private List<File> logFiles;
     private String datePattern = "dd.MM.yyyy HH:mm:ss";
     private SimpleDateFormat simpleDateFormat = new SimpleDateFormat(datePattern, Locale.ENGLISH);
 
-    public LogParser(Path logDir) {
+    public LogParserWithStream(Path logDir) {
         this.logDir = logDir;
-        this.logFiles = getAllLogFiles(this.logDir.toString());
     }
 
     /**
      * Searching some fields on log file and return <tt>Set<? extends Object></tt>
-     * unique values for query. Query can be written in three ways.
+     * unique values for query. Using Stream API for searching necessary log lines.
+     * Query can be written in three ways.
      *
-     *  @param   query can be written in three different ways.<p>
+     * @param   query can be written in three different ways.<p>
      *      get Field1<p>
      *      get Field1 for Field2 = "Value1" and date between "After" and "Before"<p>
      *      get Field1 for Field2 = "Value1" and Field3 = "Value2" and date between "After" and "Before"<p>
@@ -35,7 +35,8 @@ public class LogParser implements QLQuery {
      *  <tt>Field1</tt> - type for <tt>HashSet<<tt>Field1</tt>></tt>.<p>
      *  <tt>Field2</tt> - type for <tt>Value1</tt>.<p>
      *  <tt>Field3</tt> - type for <tt>Value2</tt>.<p>
-     *  <tt>Value1</tt> and <tt>Value2</tt> - value which using for searching <tt>Field1</tt>.<p>
+     *  <tt>Value1</tt> - value which using for searching <tt>Field1</tt>.<p>
+     *  <tt>Value2</tt> - value which using for searching <tt>Field1</tt>.<p>
      *  <tt>After</tt> - date (not including) after which necessary looking <tt>Filed1</tt>. If field is <code>null</code>, search will be limited only <tt>Before</tt><p>
      *  <tt>Before</tt> - date (not including) before which necessary looking <tt>Filed1</tt>. If field is <code>null</code>, search will be limited only <tt>After</tt>.
      *                If <tt>After</tt> and <tt>Before</tt> is <code>null</code>, search will be all log lines.
@@ -60,11 +61,11 @@ All private methods
     //return all Fields
     private Set<Object> getSimpleQuery(String simpleQuery) {
         switch(simpleQuery) {
-            case "get ip"       : return findFieldAndAdd("ip", getLinesFromLogFile(null, null));
-            case "get user"     : return findFieldAndAdd("user", getLinesFromLogFile(null, null));
-            case "get date"     : return findFieldAndAdd("date", getLinesFromLogFile(null, null));
-            case "get event"    : return findFieldAndAdd("event", getLinesFromLogFile(null, null));
-            case "get status"   : return findFieldAndAdd("status", getLinesFromLogFile(null, null));
+            case "get ip"       : return findFieldAndAdd("ip", getAllLogLinesWithStreamAPI(null, null));
+            case "get user"     : return findFieldAndAdd("user", getAllLogLinesWithStreamAPI(null, null));
+            case "get date"     : return findFieldAndAdd("date", getAllLogLinesWithStreamAPI(null, null));
+            case "get event"    : return findFieldAndAdd("event", getAllLogLinesWithStreamAPI(null, null));
+            case "get status"   : return findFieldAndAdd("status", getAllLogLinesWithStreamAPI(null, null));
         }
         return new HashSet<>();
     }
@@ -90,7 +91,7 @@ All private methods
                     after = matcher.group("after"),     //date after
                     before = matcher.group("before");   //date before
 
-            List<String[]> allLogLinesBetweenDates = getLinesFromLogFile(getDate(after), getDate(before));
+            List<String[]> allLogLinesBetweenDates = getAllLogLinesWithStreamAPI(getDate(after), getDate(before));
             List<String[]> firstFilter;
             List<String[]> secondFilter;
 
@@ -111,7 +112,7 @@ All private methods
         return fields;
     }
 
-    ////return filtered all log lines by field and value
+    //return filtered all log lines by field and value
     private List<String[]> filter(List<String[]> lines, String field, String value) {
         List<String[]> list = new ArrayList<>();
         for (String[] line : lines) {
@@ -204,43 +205,32 @@ All private methods
         return false;
     }
 
-    //return all log files in directory
-    private List<File> getAllLogFiles(String packageName) {
-        File dir = null;
-        List<File> list = new ArrayList<>();
+    // Using Stream API get and return from log files all log lines which between after-before Dates.
+    private List<String[]> getAllLogLinesWithStreamAPI(Date after, Date before) {
+        List<String[]> allDateLogLines = new ArrayList<>();
+
+        Pattern shortPattern = Pattern.compile("(?<anybefore>\\.*)\\s(?<date>\\d+\\.\\d+\\.\\d+ \\d+:\\d+:\\d+)\\s(?<anyafter>\\.*)");
+
         try {
-            dir = new File(URLDecoder.decode(packageName, "UTF-8"));
-        } catch (UnsupportedEncodingException e) {
+            Files.list(logDir).filter(f -> f.toString().endsWith(".log"))
+                    .collect(Collectors.toList()).forEach(x -> {
+                        try {
+                            allDateLogLines.addAll(Files.readAllLines(x).stream()
+                                    .filter(l -> {
+                                        Matcher matcher = shortPattern.matcher(l);
+                                        if (matcher.find())
+                                            return checkDate(matcher.group("date"), after, before);
+                                        return false;
+                                    })
+                                    .map(l -> l.split("\t"))
+                                    .collect(Collectors.toList()));
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    });
+        } catch (IOException e) {
             e.printStackTrace();
         }
-        File[] files = dir.listFiles() != null ? dir.listFiles() : new File[0];
-        if (files.length != 0) {
-            for (File f : files) {
-                if (f.getAbsolutePath().toLowerCase().endsWith(".log")) {
-                    list.add(f);
-                }
-            }
-        }
-        return list;
-    }
-
-    // from log files get and return all log lines which between after-before Dates
-    private List<String[]> getLinesFromLogFile(Date after, Date before) {
-        List<String[]> lines = new ArrayList<>();
-
-        for (File log : logFiles){
-            try (BufferedReader br = new BufferedReader(new FileReader(log))) {
-                String s;
-                while ((s = br.readLine()) != null) {
-                    String[] line = s.split("\t");
-                    if (checkDate(line[2], after, before)) {
-                        lines.add(line);
-                    }
-                }
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
-        return lines;
+        return allDateLogLines;
     }
 }
